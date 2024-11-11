@@ -1,0 +1,46 @@
+digraph G {
+  subgraph cluster_server1 {
+      style="invis"
+    spire_server[label=<<table border="0"><tr><td><b>SPIRE Server</b></td></tr><tr><td align="left"><font point-size="9">NodeAttestors: tpm</font></td></tr></table>>,shape="record",style="rounded,solid,filled,bold",color="#6c8ebf",fillcolor="#dae8fc"]
+    fetchca_server[label=<<table border="0"><tr><td><b>SPIFFE Step SSH FetchCA</b></td></tr><tr><td align="left"><font point-size="9">&nbsp;</font></td></tr></table>>,shape="record",style="rounded,solid,filled,bold",color="#6c8ebf",fillcolor="#dae8fc"]
+    step_server[label=<<table border="0"><tr><td><b>SPIFFE Step SSH</b></td></tr><tr><td align="left"><font point-size="9">&nbsp;</font></td></tr></table>>,shape="record",style="rounded,solid,filled,bold",color="#6c8ebf",fillcolor="#dae8fc"]
+  }
+  
+  subgraph cluster_node1 {
+      label = "node name: n1"
+      #style = dashed
+        style="filled,solid,bold";
+        color="#b3b3b3";
+        fillcolor="#f5f5f5";
+        labeljust="l"; 
+
+          spire_agent1[label=<<table border="0"><tr><td><b>SPIRE Agent</b></td></tr><tr><td align="left"><font point-size="9">NodeAttestor: tpm</font></td></tr><tr><td align="left"><font point-size="9">WorkloadAttestor: systemd</font></td></tr><tr><td align="left"><font point-size="9">systemd: spire-agent@.service</font></td></tr></table>>,shape="record",style="rounded,solid,filled,bold",color="#82b366",fillcolor="#d5e8d4"]
+          sshd1[label="sshd",shape="box",style="rounded,solid,filled,bold",color="#d6b656",fillcolor="#fff2cc"]
+        subgraph cluster_step {
+          label="unit: spiffe-step-ssh@.service"
+          style = "filled"
+          color="#d6b656"
+          fillcolor="#fff2cc"
+          spiffe_helper1[label=<<table border="0"><tr><td><b>SPIFFE Helper</b></td></tr></table>>,shape="box",style="rounded,solid,filled,bold",color="#d79b00",fillcolor="#ffe6cc"]
+          update_sh[label=<<table border="0"><tr><td><b>update.sh</b></td></tr></table>>,shape="box",style="rounded,solid,filled,bold",color="#d79b00",fillcolor="#ffe6cc"]
+          step[label=<<table border="0"><tr><td><b>step cli</b></td></tr></table>>,shape="box",style="rounded,solid,filled,bold",color="#d79b00",fillcolor="#ffe6cc"]
+      	spiffe_helper_files1[label="x509 cert,key,trustBundle", shape="note",style="filled",fillcolor="#ffffff"]
+      	ssh_files1[label="ssh cert,pubkey,privkey", shape="note",style="filled",fillcolor="#ffffff"]
+      	step_files1[label="step-ca.pem", shape="note",style="filled",fillcolor="#ffffff"]
+	}
+      }
+  
+  spire_server -> spire_agent1:w[dir=back]
+  spire_agent1 -> spiffe_helper1[dir=back]
+  spiffe_helper1 -> spiffe_helper_files1
+  spiffe_helper_files1 -> update_sh
+  spiffe_helper_files1 -> step
+  spiffe_helper1:e -> update_sh
+  update_sh -> step
+  update_sh -> step_files1
+  step_files1 -> step
+  step -> ssh_files1
+  fetchca_server -> update_sh:e
+  step_server -> step:e
+  ssh_files1 -> sshd1
+}
