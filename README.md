@@ -15,6 +15,18 @@ Also, the step binary needs to be installed. [Install Instructions](https://smal
 
 There is a helm chart available [here](https://github.com/spiffe/helm-charts-hardened/tree/main/charts/spiffe-step-ssh)
 
+## Server Config
+
+Each node needs its own entry, under the /sshd/<nodename> space.
+
+Example:
+```
+spire-server entry create \
+  -parentID spiffe://example.com/spire/agent/http_challenge/test.example.com \
+  -spiffeID spiffe://example.com/sshd/test.example.com \
+  -selector systemd:id:spiffe-step-ssh@main.service
+```
+
 ## Install
 
 ```
