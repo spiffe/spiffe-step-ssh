@@ -40,7 +40,7 @@ digraph G {
   update_sh -> step_files1
   step_files1 -> step
   step -> ssh_files1
-  fetchca_server -> update_sh:e
-  step_server -> step:e
+  fetchca_server -> update_sh:e[dir=back]
+  step_server -> step:e[dir=back]
   ssh_files1 -> sshd1
 }
