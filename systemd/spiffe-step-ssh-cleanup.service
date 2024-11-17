@@ -4,7 +4,7 @@ DefaultDependencies=no
 Before=shutdown.target reboot.target halt.target
 
 [Service]
-ExecStart=/usr/libexec/spiffe-step-ssh/reset.sh
+ExecStart=rm -f /etc/ssh/sshd_config.d/50-spiffe-step-ssh.conf
 Type=oneshot
 
 [Install]
