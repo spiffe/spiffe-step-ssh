@@ -62,7 +62,7 @@ HostCertificate ${RUNDIR}/ssh_host_ecdsa_key-cert.pub
 HostCertificate ${RUNDIR}/ssh_host_ed25519_key-cert.pub
 FEOF
 	mv "$tmpfile" /etc/ssh/sshd_config.d/50-spiffe-step-ssh.conf || exit 1
-        grep 'Include /etc/ssh/sshd_config.d/*.conf' /etc/ssh/sshd_config > /dev/null || echo 'Include /etc/ssh/sshd_config.d/*.conf' >> /etc/ssh/sshd_config
+        grep 'Include /etc/ssh/sshd_config.d/\*.conf' /etc/ssh/sshd_config > /dev/null || echo 'Include /etc/ssh/sshd_config.d/*.conf' >> /etc/ssh/sshd_config
 
         chcon system_u:object_r:sshd_key_t:s0 "${RUNDIR}"/ssh_host* || true
 
