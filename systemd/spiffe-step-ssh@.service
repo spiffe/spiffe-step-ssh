@@ -13,7 +13,7 @@ EnvironmentFile=-/etc/spiffe/step-ssh/%i.conf
 ExecStart=spiffe-helper -config /var/run/spiffe/step-ssh/%i/helper.conf
 ExecStartPre=mkdir -p /var/run/spiffe/step-ssh/%i
 ExecStartPre=chmod 700 /var/run/spiffe/step-ssh/%i
-ExecStartPre=/bin/bash -c "echo Y21kID0gImJhc2giCmNtZF9hcmdzID0gIi91c3IvbGliZXhlYy9zcGlmZmUtc3RlcC1zc2gvdXBkYXRlLnNoIgpjZXJ0X2RpciA9ICJAQ0RAIgpzdmlkX2ZpbGVfbmFtZSA9ICJ0bHMuY3J0IgpzdmlkX2tleV9maWxlX25hbWUgPSAidGxzLmtleSIKc3ZpZF9idW5kbGVfZmlsZV9uYW1lID0gInNwaWZmZS1jYS5wZW0iCg== | base64 -d > /var/run/spiffe/step-ssh/%i/helper.conf"
+ExecStartPre=/bin/bash -c "echo Y21kID0gImJhc2giCmNtZF9hcmdzID0gIi91c3IvbGliZXhlYy9zcGlmZmUtc3RlcC1zc2gvdXBkYXRlLnNoIgpjZXJ0X2RpciA9ICJAQ0RAIgpzdmlkX2ZpbGVfbmFtZSA9ICJ0bHMuY3J0IgpzdmlkX2tleV9maWxlX25hbWUgPSAidGxzLmtleSIKc3ZpZF9idW5kbGVfZmlsZV9uYW1lID0gInNwaWZmZS1jYS5wZW0iCnJlbmV3X3NpZ25hbCA9ICJTSUdIVVAiCg== | base64 -d > /var/run/spiffe/step-ssh/%i/helper.conf"
 ExecStartPre=/bin/sed -i "s^@CD@^/var/run/spiffe/step-ssh/%i^" /var/run/spiffe/step-ssh/%i/helper.conf
 
 [Install]
