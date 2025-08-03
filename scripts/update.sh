@@ -23,6 +23,14 @@ fi
 SPIFFE_STEP_SSH_URL="${SPIFFE_STEP_SSH_URL:=https://spiffe-step-ssh${INSTANCE_SUFFIX}.${SPIFFE_TRUST_DOMAIN}}"
 SPIFFE_STEP_SSH_FETCHCA_URL="${SPIFFE_STEP_SSH_FETCHCA_URL:=https://spiffe-step-ssh-fetchca${INSTANCE_SUFFIX}.${SPIFFE_TRUST_DOMAIN}}"
 
+if [ "x${SPIFFE_STEP_SSH_PORT}" != "x" ]; then
+  SPIFFE_STEP_SSH_URL="${SPIFFE_STEP_SSH_URL}:${SPIFFE_STEP_SSH_PORT}"
+fi
+
+if [ "x${SPIFFE_STEP_SSH_FETCHCA_PORT}" != "x" ]; then
+  SPIFFE_STEP_SSH_FETCHCA_URL="${SPIFFE_STEP_SSH_FETCHCA_URL}:${SPIFFE_STEP_SSH_FETCHCA_PORT}"
+fi
+
 # FIXME If *_URL doesn't start with HTTPS://, add it to make things easier to use.
 
 update-certs() {(
