@@ -7,7 +7,7 @@ StartLimitIntervalSec=0
 [Service]
 Restart=always
 RestartSec=5s
-Environment="PIFFE_ENDPOINT_SOCKET=/var/run/spire/agent/sockets/%i/public/api.sock"
+Environment="SPIFFE_ENDPOINT_SOCKET=/var/run/spire/agent/sockets/%i/public/api.sock"
 Environment="SPIFFE_STEP_SSH_INSTANCE=%i"
 EnvironmentFile=-/etc/spiffe/step-ssh/default.env
 EnvironmentFile=-/etc/spiffe/step-ssh/%i.conf
