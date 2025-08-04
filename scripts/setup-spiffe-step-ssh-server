@@ -1,0 +1,26 @@
+#!/bin/bash
+
+if [ "x$1" == "x" ]; then
+  echo "Usage: $0 <instance name>"
+  exit 1
+fi
+
+. /etc/spiffe/default-trust-domain.env
+INSTANCE="$1"
+INSTANCE_SUFFIX="-${INSTANCE}"
+if [[ "${INSTANCE}" == "main" ]]; then
+	INSTANCE_SUFFIX=""
+fi
+HOST="spiffe-step-ssh${INSTANCE_SUFFIX}"
+PASSWORD=$(openssl rand -base64 48)
+PORT=7443
+if [[ ! "$HOST" =~ \. ]]; then
+  HOST="${HOST}.${SPIFFE_TRUST_DOMAIN}"
+fi
+mkdir -p /etc/spiffe/step-ssh-server/$INSTANCE
+[ ! -f /etc/spiffe/step-ssh-server/$INSTANCE/password.txt ] && echo "$PASSWORD" > /etc/spiffe/step-ssh-server/$INSTANCE/password.txt
+if [ -f /etc/spiffe/step-ssh-server/$INSTANCE/values.yaml ]; then
+  echo Instance already inited.
+  exit 1
+fi
+step ca init --helm --deployment-type=Standalone --name='SSH CA' --dns "$HOST" --ssh --address ":$PORT" --provisioner default --password-file /etc/spiffe/step-ssh-server/$INSTANCE/password.txt --no-db > /etc/spiffe/step-ssh-server/$INSTANCE/values.yaml

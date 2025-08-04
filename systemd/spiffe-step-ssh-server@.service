@@ -1,0 +1,49 @@
+[Unit]
+Description=SPIFFE Step SSH Server %i
+PartOf=spire.target
+After=network-online.target local-fs.target time-sync.target
+Before=remote-fs-pre.target
+Wants=network-online.target local-fs.target time-sync.target remote-fs-pre.target spire-agent.target
+StartLimitIntervalSec=0
+
+[Service]
+WorkingDirectory=/var/run
+StateDirectory=spiffe/step-ssh-server/%i
+RuntimeDirectory=spiffe/step-ssh-server/%i
+RuntimeDirectoryPreserve=true
+ConfigurationDirectory=spiffe/step-ssh-server
+Environment="SPIFFE_ENDPOINT_SOCKET=/var/run/spire/agent/sockets/%i/public/api.sock"
+Environment="SPIFFE_STEP_SSH_SERVER_WD=/var/run/spiffe/step-ssh-server/%i"
+Environment="INSTANCE=%i"
+EnvironmentFile=-/etc/spiffe/default-trust-domain.env
+EnvironmentFile=-/etc/spiffe/step-ssh-server/default.conf
+EnvironmentFile=-/etc/spiffe/step-ssh-server/%i/env
+ExecStart=/bin/spiffe-helper -config /var/run/spiffe/step-ssh-server/%i/helper.conf
+ExecStartPre=mkdir -p /var/run/spiffe/step-ssh-server/%i/
+ExecStartPre=/bin/bash -c "echo Y2VydF9kaXIgPSAiQENEQCIKc3ZpZF9maWxlX25hbWUgPSAidGxzLmNydCIKc3ZpZF9rZXlfZmlsZV9uYW1lID0gInRscy5rZXkiCnN2aWRfYnVuZGxlX2ZpbGVfbmFtZSA9ICJjYS5jcnQiCmp3dF9idW5kbGVfZmlsZV9uYW1lID0gImp3dF9idW5kbGUuanNvbiIKY21kID0gIi91c3IvbGliZXhlYy9zcGlmZmUvc3RlcC1zc2gtc2VydmVyL21haW4iCnJlbmV3X3NpZ25hbCA9ICJTSUdURVJNIgo=| base64 -d > /var/run/spiffe/step-ssh-server/%i/helper.conf"
+ExecStartPre=/bin/sed -i "s^@CD@^/var/run/spiffe/step-ssh-server/%i^" /var/run/spiffe/step-ssh-server/%i/helper.conf
+# https://gist.github.com/ageis/f5595e59b1cddb1513d1b425a323db04
+LockPersonality=true
+MemoryDenyWriteExecute=true
+NoNewPrivileges=true
+PrivateDevices=false
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=true
+ProtectHostname=true
+ProtectKernelLogs=true
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadOnlyPaths=/
+ReadWritePaths=/var/run/spire/agent
+Restart=always
+RestartSec=5s
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=true
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+TasksMax=infinity
+
+[Install]
+WantedBy=spire.target
