@@ -1,0 +1,8 @@
+#!/bin/bash
+. /etc/spiffe/default-trust-domain.env
+if [ "x$1" == "x" ]; then
+  echo "Usage: $0 <instance name>"
+  exit 1
+fi
+CA="$(yq .inject.certificates.ssh_host_ca /etc/spiffe/step-ssh-server/$1/values.yaml)"
+echo "@cert-authority *.${SPIFFE_TRUST_DOMAIN} $CA"

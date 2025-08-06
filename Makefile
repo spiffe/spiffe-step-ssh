@@ -21,6 +21,7 @@ install-server:
 	install systemd/spiffe-step-ssh-fetchca@.service $(DESTDIR)/usr/lib/systemd/system
 	install scripts/server.sh  $(DESTDIR)/usr/libexec/spiffe/step-ssh-server/main
 	install scripts/setup-spiffe-step-ssh-server  $(DESTDIR)/usr/sbin
+	install scripts/spiffe-step-ssh-get-cert-authority  $(DESTDIR)/usr/sbin
 	install conf/ssh_x5c.tpl  $(DESTDIR)/usr/libexec/spiffe/step-ssh-server
 	install conf/nginx-fetchca.conf  $(DESTDIR)/usr/libexec/spiffe/step-ssh-server
 	install conf/helper-fetchca.conf  $(DESTDIR)/usr/libexec/spiffe/step-ssh-server

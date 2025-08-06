@@ -24,3 +24,5 @@ if [ -f /etc/spiffe/step-ssh-server/$INSTANCE/values.yaml ]; then
   exit 1
 fi
 step ca init --helm --deployment-type=Standalone --name='SSH CA' --dns "$HOST" --ssh --address ":$PORT" --provisioner default --password-file /etc/spiffe/step-ssh-server/$INSTANCE/password.txt --no-db > /etc/spiffe/step-ssh-server/$INSTANCE/values.yaml
+echo Add the following to your ~/.ssh/known_hosts file:
+spiffe-step-ssh-get-cert-authority "${INSTANCE}"
