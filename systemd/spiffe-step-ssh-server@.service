@@ -20,7 +20,7 @@ EnvironmentFile=-/etc/spiffe/step-ssh-server/default.conf
 EnvironmentFile=-/etc/spiffe/step-ssh-server/%i/env
 ExecStart=/bin/spiffe-helper -config /var/run/spiffe/step-ssh-server/%i/helper.conf
 ExecStartPre=mkdir -p /var/run/spiffe/step-ssh-server/%i/
-ExecStartPre=/bin/bash -c "echo Y2VydF9kaXIgPSAiQENEQCIKc3ZpZF9maWxlX25hbWUgPSAidGxzLmNydCIKc3ZpZF9rZXlfZmlsZV9uYW1lID0gInRscy5rZXkiCnN2aWRfYnVuZGxlX2ZpbGVfbmFtZSA9ICJjYS5jcnQiCmp3dF9idW5kbGVfZmlsZV9uYW1lID0gImp3dF9idW5kbGUuanNvbiIKY21kID0gIi91c3IvbGliZXhlYy9zcGlmZmUvc3RlcC1zc2gtc2VydmVyL21haW4iCnJlbmV3X3NpZ25hbCA9ICJTSUdURVJNIgo=| base64 -d > /var/run/spiffe/step-ssh-server/%i/helper.conf"
+ExecStartPre=/bin/bash -c "echo Y2VydF9kaXIgPSAiQENEQCIKc3ZpZF9maWxlX25hbWUgPSAidGxzLmNydCIKc3ZpZF9rZXlfZmlsZV9uYW1lID0gInRscy5rZXkiCnN2aWRfYnVuZGxlX2ZpbGVfbmFtZSA9ICJjYS5jcnQiCmp3dF9idW5kbGVfZmlsZV9uYW1lID0gImp3dF9idW5kbGUuanNvbiIKY21kID0gIi91c3IvbGliZXhlYy9zcGlmZmUvc3RlcC1zc2gtc2VydmVyL21haW4iCnJlbmV3X3NpZ25hbCA9ICJTSUdIVVAiCg==| base64 -d > /var/run/spiffe/step-ssh-server/%i/helper.conf"
 ExecStartPre=/bin/sed -i "s^@CD@^/var/run/spiffe/step-ssh-server/%i^" /var/run/spiffe/step-ssh-server/%i/helper.conf
 # https://gist.github.com/ageis/f5595e59b1cddb1513d1b425a323db04
 LockPersonality=true
