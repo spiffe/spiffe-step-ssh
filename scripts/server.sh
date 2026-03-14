@@ -44,4 +44,13 @@ trap 'run_setup' SIGHUP
 run_setup
 step-ca ca.json --password-file "/etc/spiffe/step-ssh-server/${INSTANCE}/password.txt" &
 CA_PID=$!
-wait "$CA_PID"
+while kill -0 "$CA_PID" 2>/dev/null; do
+  set +e
+  wait "$CA_PID"
+  EXIT_STATUS=$?
+  set -e
+  if [ "$EXIT_STATUS" -gt 128 ]; then
+      continue
+  fi
+  break
+done
