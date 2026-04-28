@@ -22,6 +22,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-jose/go-jose/v3"
+	"github.com/go-jose/go-jose/v3/jwt"
 	"github.com/smallstep/certificates/api"
 	"github.com/smallstep/certificates/ca"
 	"github.com/spiffe/go-spiffe/v2/workloadapi"
@@ -40,6 +42,54 @@ type HAConfig struct {
 type ResultState struct {
 	Priv crypto.Signer
 	Cert *ssh.Certificate
+}
+
+// Use lowercase JSON tags to match Smallstep's internal unmarshaling
+type stepSSHClaims struct {
+    CertType   string   `json:"certType"`
+    Principals []string `json:"principals,omitempty"`
+}
+
+type stepClaims struct {
+    SSH *stepSSHClaims `json:"ssh"`
+}
+
+type fullClaims struct {
+    jwt.Claims // Embedded standard claims (iss, sub, aud, exp, etc.)
+    Step *stepClaims `json:"step"`
+}
+
+func generateX5cToken(svidCert *x509.Certificate, svidPriv crypto.Signer, aud string, principal string) (string, error) {
+	var alg jose.SignatureAlgorithm
+	if _, ok := svidPriv.(*ecdsa.PrivateKey); ok {
+	    alg = jose.ES256
+	} else {
+	    alg = jose.RS256
+	}
+	opts := &jose.SignerOptions{}
+	opts.WithHeader("x5c", [][]byte{svidCert.Raw})
+	sig, err := jose.NewSigner(jose.SigningKey{Algorithm: alg, Key: svidPriv}, opts)
+	if err != nil {
+		return "", err
+	}
+	now := time.Now()
+	cl := fullClaims{
+		Claims: jwt.Claims{
+			Subject:   principal,
+			Issuer:    "x5c@spiffe",
+			Audience:  jwt.Audience{aud + "/ssh/sign#x5c/x5c@spiffe"},
+			Expiry:    jwt.NewNumericDate(now.Add(5 * time.Minute)),
+			NotBefore: jwt.NewNumericDate(now.Add(-1 * time.Minute)),
+			IssuedAt:  jwt.NewNumericDate(now),
+		},
+		Step: &stepClaims{
+			SSH: &stepSSHClaims{
+			CertType:   "user",
+			Principals: []string{principal},
+			},
+		},
+	}
+	return jwt.Signed(sig).Claims(cl).CompactSerialize()
 }
 
 func getEnv(key, fallback string) string {
@@ -278,9 +328,16 @@ func runWorkflow(ctx context.Context, cfg HAConfig) (*ResultState, error) {
 		return nil, fmt.Errorf("failed to create step ca client: %w", err)
 	}
 
+	aud := cfg.StepCAURL
+	token, err := generateX5cToken(svid.Certificates[0], svid.PrivateKey, aud, cfg.Principal)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create x5c token: %w", err)
+	}
+
 	req := &api.SSHSignRequest{
 		PublicKey: pub.Marshal(),
 		CertType:  "user",
+		OTT:       token,
 	}
 	if cfg.Principal != "" {
 		req.Principals = []string{cfg.Principal}
