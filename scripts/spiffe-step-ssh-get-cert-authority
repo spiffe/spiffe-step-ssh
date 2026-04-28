@@ -1,8 +1,40 @@
 #!/bin/bash
 . /etc/spiffe/default-trust-domain.env
-if [ "x$1" == "x" ]; then
-  echo "Usage: $0 <instance name>"
+
+if [ "$#" -ne 2 ]; then
+  echo "Usage: $0 <host|user> <instance name>" >&2
   exit 1
 fi
-CA="$(yq .inject.certificates.ssh_host_ca /etc/spiffe/step-ssh-server/$1/values.yaml)"
-echo "@cert-authority *.${SPIFFE_TRUST_DOMAIN} $CA"
+
+TYPE=$1
+INSTANCE=$2
+YAML_PATH="/etc/spiffe/step-ssh-server/${INSTANCE}/values.yaml"
+
+if [ ! -f "$YAML_PATH" ]; then
+  echo "Error: Configuration file not found at $YAML_PATH" >&2
+  exit 1
+fi
+
+case "$TYPE" in
+  host)
+    KEY=".inject.certificates.ssh_host_ca"
+    PREFIX="@cert-authority *.${SPIFFE_TRUST_DOMAIN}"
+    ;;
+  user)
+    KEY=".inject.certificates.ssh_user_ca"
+    PREFIX="cert-authority"
+    ;;
+  *)
+    echo "Error: First argument must be 'host' or 'user' (received: '$TYPE')." >&2
+    exit 1
+    ;;
+esac
+
+CA=$(yq "$KEY" "$YAML_PATH")
+
+if [ "$CA" == "null" ] || [ -z "$CA" ]; then
+  echo "Error: Could not find $TYPE CA for instance '$INSTANCE' in $YAML_PATH" >&2
+  exit 1
+fi
+
+echo "$PREFIX $CA"
