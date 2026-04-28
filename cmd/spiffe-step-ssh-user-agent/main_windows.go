@@ -3,6 +3,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"net"
 	"os"
@@ -10,7 +11,7 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 )
 
-func setupAgentInteraction(allowInternal bool) (agent.ExtendedAgent, bool) {
+func setupAgentInteraction(_ context.Context, allowInternal bool) (agent.ExtendedAgent, bool) {
 	pipePath := `\\.\pipe\openssh-ssh-agent`
 	conn, err := winio.DialPipe(pipePath, nil)
 	if err == nil {
@@ -18,7 +19,7 @@ func setupAgentInteraction(allowInternal bool) (agent.ExtendedAgent, bool) {
 	}
 
 	if allowInternal {
-		myPipe := `\\.\pipe\spiffe-step-agent`
+		myPipe := `\\.\pipe\spiffe-step-ssh-user-agent`
 		l, err := winio.ListenPipe(myPipe, nil)
 		if err != nil {
 			return nil, false

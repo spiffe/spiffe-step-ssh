@@ -44,7 +44,6 @@ type ResultState struct {
 	Cert *ssh.Certificate
 }
 
-// Use lowercase JSON tags to match Smallstep's internal unmarshaling
 type stepSSHClaims struct {
     CertType   string   `json:"certType"`
     Principals []string `json:"principals,omitempty"`
@@ -55,7 +54,7 @@ type stepClaims struct {
 }
 
 type fullClaims struct {
-    jwt.Claims // Embedded standard claims (iss, sub, aud, exp, etc.)
+    jwt.Claims
     Step *stepClaims `json:"step"`
 }
 
@@ -110,7 +109,6 @@ func getRequiredEnv(key string) string {
 func main() {
 	keyFile := flag.String("key-out", "", "Path to write SSH private key")
 	certFile := flag.String("cert-out", "", "Path to write SSH certificate")
-	principalFlag := flag.String("principal", "", "Principal to set")
 	flag.Parse()
 
 	mode := getEnv("SPIFFE_STEP_SSH_USER_AGENT_MODE", "one-shot")
@@ -141,10 +139,7 @@ func main() {
 		os.Exit(0)
 	}
 
-	principal := ""
-	if principalFlag != nil && *principalFlag != "" {
-		principal = *principalFlag
-	}
+	principal := "spiffe-step-ssh-user-agent"
 	var configs []HAConfig
 	if haMode == "ha-agent" {
 		configs = []HAConfig{
@@ -178,39 +173,37 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	keyring, _ := setupAgentInteraction(*keyFile == "" && *certFile == "")
+	keyring, _ := setupAgentInteraction(ctx, *keyFile == "" && *certFile == "")
 
-	var wg sync.WaitGroup
+	ready := make(chan struct{})
+	var once sync.Once
+
 	for _, cfg := range configs {
-		wg.Add(1)
 		go func(c HAConfig) {
 			firstRun := true
 			for {
-				state, err := runWorkflow(ctx, c)
+				state, spiffeID, err := runWorkflow(ctx, c)
 				if err != nil {
 					log.Printf("[%s] Workflow failed: %v. Retrying in 10s...", c.ID, err)
 					select {
 					case <-ctx.Done():
-						if firstRun {
-							wg.Done()
-						}
 						return
 					case <-time.After(10 * time.Second):
 						continue
 					}
 				}
 
-				handleOutput(state, keyring, *keyFile, *certFile)
-
+				handleOutput(state, keyring, *keyFile, *certFile, spiffeID)
 				if firstRun {
-					wg.Done()
+					once.Do(func() {
+						close(ready)
+					})
 					firstRun = false
 				}
 
 				if mode == "one-shot" {
 					return
 				}
-
 				wait := time.Until(time.Unix(int64(state.Cert.ValidBefore), 0))
 				select {
 				case <-ctx.Done():
@@ -221,27 +214,29 @@ func main() {
 			}
 		}(cfg)
 	}
-
-	wg.Wait()
-
+	select {
+	case <-ready:
+		log.Println("Agent initialized with at least one viable certificate.")
+	case <-ctx.Done():
+		log.Println("Context cancelled before any certificate was obtained.")
+		return
+	}
 	if *keyFile != "" && *certFile != "" {
 		fmt.Printf("export SSH_CERT_PATH=%s;\n", *certFile)
 		fmt.Printf("export SSH_KEY_PATH=%s;\n", *keyFile)
 	}
-
 	if mode == "continuous" {
 		fmt.Println("READY")
-		os.Stdout.Close()
 		<-ctx.Done()
 	}
 }
 
-func handleOutput(state *ResultState, keyring agent.ExtendedAgent, keyPath, certPath string) {
+func handleOutput(state *ResultState, keyring agent.ExtendedAgent, keyPath, certPath string, spiffeID string) {
 	if keyring != nil {
 		err := keyring.Add(agent.AddedKey{
 			PrivateKey:   state.Priv,
 			Certificate:  state.Cert,
-			Comment:      "spiffe-step-agent",
+			Comment:      spiffeID,
 			LifetimeSecs: uint32(time.Until(time.Unix(int64(state.Cert.ValidBefore), 0)).Seconds()),
 		})
 		if err == nil {
@@ -259,21 +254,22 @@ func handleOutput(state *ResultState, keyring agent.ExtendedAgent, keyPath, cert
 	}
 }
 
-func runWorkflow(ctx context.Context, cfg HAConfig) (*ResultState, error) {
+func runWorkflow(ctx context.Context, cfg HAConfig) (*ResultState, string, error) {
 	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr("unix://" + cfg.SpiffeSocket)))
 	if err != nil {
-		return nil, fmt.Errorf("failed to create x509 source: %w", err)
+		return nil, "", fmt.Errorf("failed to create x509 source: %w", err)
 	}
 	defer source.Close()
 
 	svid, err := source.GetX509SVID()
 	if err != nil {
-		return nil, fmt.Errorf("failed to get x509 svid: %w", err)
+		return nil, "", fmt.Errorf("failed to get x509 svid: %w", err)
 	}
+	spiffeID := svid.ID.String()
 
 	bundle, err := source.GetX509BundleForTrustDomain(svid.ID.TrustDomain())
 	if err != nil {
-		return nil, fmt.Errorf("failed to get x509 bundle: %w", err)
+		return nil, "", fmt.Errorf("failed to get x509 bundle: %w", err)
 	}
 
 	rootPool := x509.NewCertPool()
@@ -296,18 +292,18 @@ func runWorkflow(ctx context.Context, cfg HAConfig) (*ResultState, error) {
 
 	respFetch, err := httpClient.Get(cfg.FetchCAURL)
 	if err != nil {
-		return nil, fmt.Errorf("failed to fetch Step CA roots from %s: %w", cfg.FetchCAURL, err)
+		return nil, "", fmt.Errorf("failed to fetch Step CA roots from %s: %w", cfg.FetchCAURL, err)
 	}
 	defer respFetch.Body.Close()
 
 	pemRoots, err := io.ReadAll(respFetch.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read Step CA roots body: %w", err)
+		return nil, "", fmt.Errorf("failed to read Step CA roots body: %w", err)
 	}
 
 	stepRootPool := x509.NewCertPool()
 	if ok := stepRootPool.AppendCertsFromPEM(pemRoots); !ok {
-		return nil, fmt.Errorf("failed to parse Step CA roots from fetched document")
+		return nil, "", fmt.Errorf("failed to parse Step CA roots from fetched document")
 	}
 
 	priv, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -325,13 +321,13 @@ func runWorkflow(ctx context.Context, cfg HAConfig) (*ResultState, error) {
 		ca.WithTransport(&http.Transport{TLSClientConfig: stepTLSConfig}),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create step ca client: %w", err)
+		return nil, "", fmt.Errorf("failed to create step ca client: %w", err)
 	}
 
 	aud := cfg.StepCAURL
 	token, err := generateX5cToken(svid.Certificates[0], svid.PrivateKey, aud, cfg.Principal)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create x5c token: %w", err)
+		return nil, "", fmt.Errorf("failed to create x5c token: %w", err)
 	}
 
 	req := &api.SSHSignRequest{
@@ -345,8 +341,8 @@ func runWorkflow(ctx context.Context, cfg HAConfig) (*ResultState, error) {
 
 	resp, err := client.SSHSign(req)
 	if err != nil {
-		return nil, fmt.Errorf("ssh sign request failed: %w", err)
+		return nil, "", fmt.Errorf("ssh sign request failed: %w", err)
 	}
 
-	return &ResultState{Priv: priv, Cert: resp.Certificate.Certificate}, nil
+	return &ResultState{Priv: priv, Cert: resp.Certificate.Certificate}, spiffeID, nil
 }

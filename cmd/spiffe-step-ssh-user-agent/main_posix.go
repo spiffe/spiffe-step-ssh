@@ -2,7 +2,9 @@
 package main
 
 import (
+	"context"
 	"fmt"
+	"log"
 	"net"
 	"os"
 	"path/filepath"
@@ -10,7 +12,7 @@ import (
 	"golang.org/x/crypto/ssh/agent"
 )
 
-func setupAgentInteraction(allowInternal bool) (agent.ExtendedAgent, bool) {
+func setupAgentInteraction(ctx context.Context, allowInternal bool) (agent.ExtendedAgent, bool) {
 	sock := os.Getenv("SSH_AUTH_SOCK")
 	if sock != "" {
 		conn, err := net.Dial("unix", sock)
@@ -20,7 +22,7 @@ func setupAgentInteraction(allowInternal bool) (agent.ExtendedAgent, bool) {
 	}
 
 	if allowInternal {
-		tempDir, err := os.MkdirTemp("", "spiffe-step-agent.*")
+		tempDir, err := os.MkdirTemp("", "spiffe-step-ssh-user-agent.*")
 		if err != nil {
 			return nil, false
 		}
@@ -30,13 +32,21 @@ func setupAgentInteraction(allowInternal bool) (agent.ExtendedAgent, bool) {
 			os.RemoveAll(tempDir)
 			return nil, false
 		}
+
 		fmt.Printf("SSH_AUTH_SOCK=%s; export SSH_AUTH_SOCK;\n", path)
 		fmt.Printf("SSH_AGENT_PID=%d; export SSH_AGENT_PID;\n", os.Getpid())
 		fmt.Printf("echo Agent pid %d;\n", os.Getpid())
+
 		keyring := agent.NewKeyring().(agent.ExtendedAgent)
+
 		go func() {
-			defer l.Close()
-			defer os.RemoveAll(tempDir)
+			<-ctx.Done()
+			log.Println("Cleaning up internal agent socket...")
+			l.Close()
+			os.RemoveAll(tempDir)
+		}()
+
+		go func() {
 			for {
 				conn, err := l.Accept()
 				if err != nil {
@@ -45,6 +55,7 @@ func setupAgentInteraction(allowInternal bool) (agent.ExtendedAgent, bool) {
 				go agent.ServeAgent(keyring, conn)
 			}
 		}()
+
 		return keyring, true
 	}
 
