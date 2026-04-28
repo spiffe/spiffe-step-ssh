@@ -63,8 +63,8 @@ func main() {
 	principalFlag := flag.String("principal", "", "Principal to set")
 	flag.Parse()
 
-	mode := getEnv("SPIFFE_STEP_USER_AGENT_MODE", "one-shot")
-	haMode := getEnv("SPIFFE_STEP_USER_AGENT_HA_MODE", "regular")
+	mode := getEnv("SPIFFE_STEP_SSH_USER_AGENT_MODE", "one-shot")
+	haMode := getEnv("SPIFFE_STEP_SSH_USER_AGENT_HA_MODE", "regular")
 
 	if mode == "continuous" && os.Getenv("DAEMON_STARTED") != "true" {
 		cmd := exec.Command(os.Args[0], os.Args[1:]...)
@@ -102,14 +102,14 @@ func main() {
 				ID:           "A",
 				SpiffeSocket: getRequiredEnv("SPIFFE_ENDPOINT_SOCKET_A"),
 				FetchCAURL:   getRequiredEnv("SPIFFE_STEP_SSH_FETCHCA_URL_A"),
-				StepCAURL:    getRequiredEnv("STEP_CA_URL_A"),
+				StepCAURL:    getRequiredEnv("SPIFFE_STEP_SSH_URL_A"),
 				Principal:    principal,
 			},
 			{
 				ID:           "B",
 				SpiffeSocket: getRequiredEnv("SPIFFE_ENDPOINT_SOCKET_B"),
 				FetchCAURL:   getRequiredEnv("SPIFFE_STEP_SSH_FETCHCA_URL_B"),
-				StepCAURL:    getRequiredEnv("STEP_CA_URL_B"),
+				StepCAURL:    getRequiredEnv("SPIFFE_STEP_SSH_URL_B"),
 				Principal:    principal,
 			},
 		}
@@ -119,7 +119,7 @@ func main() {
 				ID:           "Main",
 				SpiffeSocket: getRequiredEnv("SPIFFE_ENDPOINT_SOCKET"),
 				FetchCAURL:   getRequiredEnv("SPIFFE_STEP_SSH_FETCHCA_URL"),
-				StepCAURL:    getRequiredEnv("STEP_CA_URL"),
+				StepCAURL:    getRequiredEnv("SPIFFE_STEP_SSH_URL"),
 				Principal:    principal,
 			},
 		}
