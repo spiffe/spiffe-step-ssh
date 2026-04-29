@@ -1,6 +1,11 @@
 default:
 	@echo Targets:
 	@echo "  install"
+	@echo "  install-server"
+	@echo "  spiffe-step-ssh-user-agent"
+
+spiffe-step-ssh-user-agent:
+	 go build ./cmd/spiffe-step-ssh-user-agent/
 
 install:
 	mkdir -p $(DESTDIR)/usr/lib/systemd/system/sshd.service.d

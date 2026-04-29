@@ -13,9 +13,10 @@ run_setup() {
     cp -af "/usr/libexec/spiffe/step-ssh-server/ssh_x5c.tpl" .
   fi
 
-  PREFIX=sshd
+  USER_PREFIX=ssh
+  HOST_PREFIX=sshd
   
-  sed -i "s/@TRUST_DOMAIN@/${SPIFFE_TRUST_DOMAIN}/g; s/@PREFIX@/${PREFIX}/g" ssh_x5c.tpl
+  sed -i "s/@TRUST_DOMAIN@/${SPIFFE_TRUST_DOMAIN}/g; s/@HOST_PREFIX@/${HOST_PREFIX}/g; s/@USER_PREFIX@/${USER_PREFIX}/g;" ssh_x5c.tpl
  
   export ROOTS=$(base64 ca.crt | tr '\n' ' ' | sed 's/ //g')
 
