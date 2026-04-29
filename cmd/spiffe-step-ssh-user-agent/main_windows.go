@@ -5,8 +5,6 @@ package main
 import (
 	"context"
 	"fmt"
-	"net"
-	"os"
 	"github.com/Microsoft/go-winio"
 	"golang.org/x/crypto/ssh/agent"
 )
