@@ -15,7 +15,7 @@ builds:
       - linux
       - windows
       - darwin
-    main: ./cmd
+    main: ./cmd/spiffe-step-ssh-user-agent
     binary: spiffe-step-ssh-user-agent
 
 archives:
