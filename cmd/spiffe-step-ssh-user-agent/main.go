@@ -324,6 +324,7 @@ func getRequiredEnv(key string) string {
 func main() {
 	keyFile := flag.String("key-out", "", "Path to write SSH private key")
 	certFile := flag.String("cert-out", "", "Path to write SSH certificate")
+	timeout := flag.Duration("timeout", 0, "Timeout for initial startup (e.g., 30s, 1m)")
 	flag.Parse()
 
 	mode := getEnv("SPIFFE_STEP_SSH_USER_AGENT_MODE", "one-shot")
@@ -365,8 +366,15 @@ func main() {
 		configs = []HAConfig{buildConfig("Main", "", principal)}
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	baseCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+
+	ctx := baseCtx
+	if *timeout > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(baseCtx, *timeout)
+		defer cancel()
+	}
 
 	keyring, _ := setupAgentInteraction(ctx, *keyFile == "" && *certFile == "")
 
@@ -423,6 +431,10 @@ func main() {
 	case <-ready:
 		log.Println("Agent initialized with at least one viable certificate.")
 	case <-ctx.Done():
+		if ctx.Err() == context.DeadlineExceeded {
+			fmt.Fprintf(os.Stderr, "Error: Failed to initialize within the specified timeout of %v\n", *timeout)
+			os.Exit(1)
+		}
 		log.Println("Context cancelled before any certificate was obtained.")
 		return
 	}
@@ -434,7 +446,7 @@ func main() {
 
 	if mode == "continuous" {
 		fmt.Println("READY")
-		<-ctx.Done()
+		<-baseCtx.Done()
 	}
 }
 
