@@ -18,6 +18,8 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
+	"strings"
 	"sync"
 	"syscall"
 	"time"
@@ -33,7 +35,9 @@ import (
 
 type HAConfig struct {
 	ID           string
+	EndpointType string
 	SpiffeSocket string
+	CredDir      string
 	FetchCAURL   string
 	StepCAURL    string
 	Principal    string
@@ -45,25 +49,236 @@ type ResultState struct {
 }
 
 type stepSSHClaims struct {
-    CertType   string   `json:"certType"`
-    Principals []string `json:"principals,omitempty"`
+	CertType   string   `json:"certType"`
+	Principals []string `json:"principals,omitempty"`
 }
 
 type stepClaims struct {
-    SSH *stepSSHClaims `json:"ssh"`
+	SSH *stepSSHClaims `json:"ssh"`
 }
 
 type fullClaims struct {
-    jwt.Claims
-    Step *stepClaims `json:"step"`
+	jwt.Claims
+	Step *stepClaims `json:"step"`
+}
+
+type Credentials struct {
+	Certs     []*x509.Certificate
+	Key       crypto.PrivateKey
+	TrustPool *x509.CertPool
+	SPIFFEID  string
+}
+
+type CredentialSource interface {
+	GetX509Credentials(ctx context.Context) (*Credentials, error)
+}
+
+type unixCredentialSource struct {
+	socketPath string
+}
+
+func (s *unixCredentialSource) GetX509Credentials(ctx context.Context) (*Credentials, error) {
+	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr("unix://"+s.socketPath)))
+	if err != nil {
+		return nil, fmt.Errorf("failed to create x509 source: %w", err)
+	}
+	defer source.Close()
+
+	svid, err := source.GetX509SVID()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get x509 svid: %w", err)
+	}
+
+	bundle, err := source.GetX509BundleForTrustDomain(svid.ID.TrustDomain())
+	if err != nil {
+		return nil, fmt.Errorf("failed to get x509 bundle: %w", err)
+	}
+
+	rootPool := x509.NewCertPool()
+	for _, root := range bundle.X509Authorities() {
+		rootPool.AddCert(root)
+	}
+
+	return &Credentials{
+		Certs:     svid.Certificates,
+		Key:       svid.PrivateKey,
+		TrustPool: rootPool,
+		SPIFFEID:  svid.ID.String(),
+	}, nil
+}
+
+type fileCredentialSource struct {
+	credDir string
+}
+
+func (s *fileCredentialSource) GetX509Credentials(ctx context.Context) (*Credentials, error) {
+	return loadFileCredentials(s.credDir)
+}
+
+func loadFileCredentials(credDir string) (*Credentials, error) {
+	credFile := filepath.Join(credDir, "x509", "0", "credential-bundle.pem")
+	credData, err := os.ReadFile(credFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read credential bundle: %w", err)
+	}
+
+	certs, privKey, err := parseCredentialBundle(credData)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse credential bundle: %w", err)
+	}
+
+	spiffeID := ""
+	for _, uri := range certs[0].URIs {
+		if uri.Scheme == "spiffe" {
+			spiffeID = uri.String()
+			break
+		}
+	}
+	if spiffeID == "" {
+		return nil, fmt.Errorf("no SPIFFE ID in leaf certificate URIs")
+	}
+
+	bundleDir := filepath.Dir(credFile)
+	matches, err := filepath.Glob(filepath.Join(bundleDir, "*.spiffe-trust-bundle.pem"))
+	if err != nil || len(matches) == 0 {
+		return nil, fmt.Errorf("no trust bundle file found in %s", bundleDir)
+	}
+	if len(matches) > 1 {
+		log.Fatalf("Found %d trust bundle files in %s; expected exactly 1: %v", len(matches), bundleDir, matches)
+	}
+
+	bundleData, err := os.ReadFile(matches[0])
+	if err != nil {
+		return nil, fmt.Errorf("failed to read trust bundle: %w", err)
+	}
+
+	trustPool := x509.NewCertPool()
+	if !trustPool.AppendCertsFromPEM(bundleData) {
+		return nil, fmt.Errorf("failed to parse trust bundle PEM")
+	}
+
+	return &Credentials{
+		Certs:     certs,
+		Key:       privKey,
+		TrustPool: trustPool,
+		SPIFFEID:  spiffeID,
+	}, nil
+}
+
+func parseCredentialBundle(data []byte) ([]*x509.Certificate, crypto.PrivateKey, error) {
+	var privKey crypto.PrivateKey
+	var certs []*x509.Certificate
+
+	block, rest := pem.Decode(data)
+	if block == nil {
+		return nil, nil, fmt.Errorf("no PEM data found in credential bundle")
+	}
+
+	var err error
+	privKey, err = parsePrivateKey(block)
+	if err != nil {
+		return nil, nil, fmt.Errorf("failed to parse private key: %w", err)
+	}
+
+	for {
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type == "CERTIFICATE" {
+			cert, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				return nil, nil, fmt.Errorf("failed to parse certificate: %w", err)
+			}
+			certs = append(certs, cert)
+		}
+	}
+
+	if len(certs) == 0 {
+		return nil, nil, fmt.Errorf("no certificates found in credential bundle")
+	}
+
+	return certs, privKey, nil
+}
+
+func parsePrivateKey(block *pem.Block) (crypto.PrivateKey, error) {
+	switch block.Type {
+	case "PRIVATE KEY":
+		return x509.ParsePKCS8PrivateKey(block.Bytes)
+	case "EC PRIVATE KEY":
+		return x509.ParseECPrivateKey(block.Bytes)
+	case "RSA PRIVATE KEY":
+		return x509.ParsePKCS1PrivateKey(block.Bytes)
+	default:
+		return nil, fmt.Errorf("unsupported private key PEM type: %s", block.Type)
+	}
+}
+
+func resolveEndpoint(suffix string) string {
+	if v := os.Getenv("SPIFFE_ENDPOINT" + suffix); v != "" {
+		return v
+	}
+	if v := os.Getenv("SPIFFE_ENDPOINT_SOCKET" + suffix); v != "" {
+		return "unix://" + v
+	}
+	return ""
+}
+
+func resolveEndpointRequired(suffix string) string {
+	if v := resolveEndpoint(suffix); v != "" {
+		return v
+	}
+	log.Fatalf("Required environment variable SPIFFE_ENDPOINT%s or SPIFFE_ENDPOINT_SOCKET%s is not set", suffix, suffix)
+	return ""
+}
+
+func parseEndpointURL(raw string) (epType, path string) {
+	parts := strings.Split(raw, ",")
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if strings.HasPrefix(p, "unix://") {
+			return "unix", strings.TrimPrefix(p, "unix://")
+		}
+		if strings.HasPrefix(p, "file://") {
+			return "file", strings.TrimPrefix(p, "file://")
+		}
+	}
+	return "", ""
+}
+
+func buildConfig(id, suffix, principal string) HAConfig {
+	raw := resolveEndpointRequired(suffix)
+	epType, epPath := parseEndpointURL(raw)
+
+	fetchCAVar := "SPIFFE_STEP_SSH_FETCHCA_URL"
+	stepCAVar := "SPIFFE_STEP_SSH_URL"
+	if suffix != "" {
+		fetchCAVar += suffix
+		stepCAVar += suffix
+	}
+
+	cfg := HAConfig{
+		ID:           id,
+		EndpointType: epType,
+		FetchCAURL:   getRequiredEnv(fetchCAVar),
+		StepCAURL:    getRequiredEnv(stepCAVar),
+		Principal:    principal,
+	}
+	switch epType {
+	case "unix":
+		cfg.SpiffeSocket = epPath
+	case "file":
+		cfg.CredDir = epPath
+	}
+	return cfg
 }
 
 func generateX5cToken(svidCert *x509.Certificate, svidPriv crypto.Signer, aud string, principal string) (string, error) {
 	var alg jose.SignatureAlgorithm
 	if _, ok := svidPriv.(*ecdsa.PrivateKey); ok {
-	    alg = jose.ES256
+		alg = jose.ES256
 	} else {
-	    alg = jose.RS256
+		alg = jose.RS256
 	}
 	opts := &jose.SignerOptions{}
 	opts.WithHeader("x5c", [][]byte{svidCert.Raw})
@@ -83,8 +298,8 @@ func generateX5cToken(svidCert *x509.Certificate, svidPriv crypto.Signer, aud st
 		},
 		Step: &stepClaims{
 			SSH: &stepSSHClaims{
-			CertType:   "user",
-			Principals: []string{principal},
+				CertType:   "user",
+				Principals: []string{principal},
 			},
 		},
 	}
@@ -143,31 +358,11 @@ func main() {
 	var configs []HAConfig
 	if haMode == "ha-agent" {
 		configs = []HAConfig{
-			{
-				ID:           "A",
-				SpiffeSocket: getRequiredEnv("SPIFFE_ENDPOINT_SOCKET_A"),
-				FetchCAURL:   getRequiredEnv("SPIFFE_STEP_SSH_FETCHCA_URL_A"),
-				StepCAURL:    getRequiredEnv("SPIFFE_STEP_SSH_URL_A"),
-				Principal:    principal,
-			},
-			{
-				ID:           "B",
-				SpiffeSocket: getRequiredEnv("SPIFFE_ENDPOINT_SOCKET_B"),
-				FetchCAURL:   getRequiredEnv("SPIFFE_STEP_SSH_FETCHCA_URL_B"),
-				StepCAURL:    getRequiredEnv("SPIFFE_STEP_SSH_URL_B"),
-				Principal:    principal,
-			},
+			buildConfig("A", "_A", principal),
+			buildConfig("B", "_B", principal),
 		}
 	} else {
-		configs = []HAConfig{
-			{
-				ID:           "Main",
-				SpiffeSocket: getRequiredEnv("SPIFFE_ENDPOINT_SOCKET"),
-				FetchCAURL:   getRequiredEnv("SPIFFE_STEP_SSH_FETCHCA_URL"),
-				StepCAURL:    getRequiredEnv("SPIFFE_STEP_SSH_URL"),
-				Principal:    principal,
-			},
-		}
+		configs = []HAConfig{buildConfig("Main", "", principal)}
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -179,10 +374,19 @@ func main() {
 	var once sync.Once
 
 	for _, cfg := range configs {
+		cfg := cfg
+		var cs CredentialSource
+		switch cfg.EndpointType {
+		case "file":
+			cs = &fileCredentialSource{credDir: cfg.CredDir}
+		default:
+			cs = &unixCredentialSource{socketPath: cfg.SpiffeSocket}
+		}
+
 		go func(c HAConfig) {
 			firstRun := true
 			for {
-				state, spiffeID, err := runWorkflow(ctx, c)
+				state, spiffeID, err := runWorkflow(ctx, c, cs)
 				if err != nil {
 					log.Printf("[%s] Workflow failed: %v. Retrying in 10s...", c.ID, err)
 					select {
@@ -214,6 +418,7 @@ func main() {
 			}
 		}(cfg)
 	}
+
 	select {
 	case <-ready:
 		log.Println("Agent initialized with at least one viable certificate.")
@@ -221,10 +426,12 @@ func main() {
 		log.Println("Context cancelled before any certificate was obtained.")
 		return
 	}
+
 	if *keyFile != "" && *certFile != "" {
 		fmt.Printf("export SSH_CERT_PATH=%s;\n", *certFile)
 		fmt.Printf("export SSH_KEY_PATH=%s;\n", *keyFile)
 	}
+
 	if mode == "continuous" {
 		fmt.Println("READY")
 		<-ctx.Done()
@@ -254,33 +461,19 @@ func handleOutput(state *ResultState, keyring agent.ExtendedAgent, keyPath, cert
 	}
 }
 
-func runWorkflow(ctx context.Context, cfg HAConfig) (*ResultState, string, error) {
-	source, err := workloadapi.NewX509Source(ctx, workloadapi.WithClientOptions(workloadapi.WithAddr("unix://" + cfg.SpiffeSocket)))
+func runWorkflow(ctx context.Context, cfg HAConfig, cs CredentialSource) (*ResultState, string, error) {
+	creds, err := cs.GetX509Credentials(ctx)
 	if err != nil {
-		return nil, "", fmt.Errorf("failed to create x509 source: %w", err)
-	}
-	defer source.Close()
-
-	svid, err := source.GetX509SVID()
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to get x509 svid: %w", err)
-	}
-	spiffeID := svid.ID.String()
-
-	bundle, err := source.GetX509BundleForTrustDomain(svid.ID.TrustDomain())
-	if err != nil {
-		return nil, "", fmt.Errorf("failed to get x509 bundle: %w", err)
+		return nil, "", fmt.Errorf("failed to get credentials: %w", err)
 	}
 
-	rootPool := x509.NewCertPool()
-	for _, root := range bundle.X509Authorities() {
-		rootPool.AddCert(root)
-	}
+	spiffeID := creds.SPIFFEID
+	rootPool := creds.TrustPool
 
 	mtlsConfig := &tls.Config{
 		Certificates: []tls.Certificate{{
-			Certificate: [][]byte{svid.Certificates[0].Raw},
-			PrivateKey:  svid.PrivateKey,
+			Certificate: [][]byte{creds.Certs[0].Raw},
+			PrivateKey:  creds.Key,
 		}},
 		RootCAs: rootPool,
 	}
@@ -311,8 +504,8 @@ func runWorkflow(ctx context.Context, cfg HAConfig) (*ResultState, string, error
 
 	stepTLSConfig := &tls.Config{
 		Certificates: []tls.Certificate{{
-			Certificate: [][]byte{svid.Certificates[0].Raw},
-			PrivateKey:  svid.PrivateKey,
+			Certificate: [][]byte{creds.Certs[0].Raw},
+			PrivateKey:  creds.Key,
 		}},
 		RootCAs: stepRootPool,
 	}
@@ -325,7 +518,11 @@ func runWorkflow(ctx context.Context, cfg HAConfig) (*ResultState, string, error
 	}
 
 	aud := cfg.StepCAURL
-	token, err := generateX5cToken(svid.Certificates[0], svid.PrivateKey, aud, cfg.Principal)
+	signer, ok := creds.Key.(crypto.Signer)
+	if !ok {
+		return nil, "", fmt.Errorf("private key does not implement crypto.Signer")
+	}
+	token, err := generateX5cToken(creds.Certs[0], signer, aud, cfg.Principal)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create x5c token: %w", err)
 	}
