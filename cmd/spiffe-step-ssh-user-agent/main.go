@@ -273,15 +273,19 @@ func buildConfig(id, suffix, principal string) HAConfig {
 	return cfg
 }
 
-func generateX5cToken(svidCert *x509.Certificate, svidPriv crypto.Signer, aud string, principal string) (string, error) {
+func generateX5cToken(svidCerts []*x509.Certificate, svidPriv crypto.Signer, aud string, principal string) (string, error) {
 	var alg jose.SignatureAlgorithm
 	if _, ok := svidPriv.(*ecdsa.PrivateKey); ok {
 		alg = jose.ES256
 	} else {
 		alg = jose.RS256
 	}
+	var x5cBytes [][]byte
+	for _, cert := range svidCerts {
+		x5cBytes = append(x5cBytes, cert.Raw)
+	}
 	opts := &jose.SignerOptions{}
-	opts.WithHeader("x5c", [][]byte{svidCert.Raw})
+	opts.WithHeader("x5c", x5cBytes)
 	sig, err := jose.NewSigner(jose.SigningKey{Algorithm: alg, Key: svidPriv}, opts)
 	if err != nil {
 		return "", err
@@ -534,7 +538,7 @@ func runWorkflow(ctx context.Context, cfg HAConfig, cs CredentialSource) (*Resul
 	if !ok {
 		return nil, "", fmt.Errorf("private key does not implement crypto.Signer")
 	}
-	token, err := generateX5cToken(creds.Certs[0], signer, aud, cfg.Principal)
+	token, err := generateX5cToken(creds.Certs, signer, aud, cfg.Principal)
 	if err != nil {
 		return nil, "", fmt.Errorf("failed to create x5c token: %w", err)
 	}
